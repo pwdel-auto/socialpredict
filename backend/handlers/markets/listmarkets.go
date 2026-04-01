@@ -1,12 +1,9 @@
 package marketshandlers
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
-	"strconv"
 
-	"socialpredict/handlers/markets/dto"
 	dmarkets "socialpredict/internal/domain/markets"
 )
 
@@ -31,19 +28,14 @@ func ListMarketsHandlerFactory(svc dmarkets.ServiceInterface) http.HandlerFunc {
 			return
 		}
 
-		overviews, err := buildMarketOverviewResponses(r.Context(), svc, markets)
+		response, err := buildListMarketsResponse(r.Context(), svc, markets)
 		if err != nil {
 			log.Printf("Error building market overviews: %v", err)
 			http.Error(w, "Error fetching markets", http.StatusInternalServerError)
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(dto.ListMarketsResponse{
-			Markets: overviews,
-			Total:   len(overviews),
-		}); err != nil {
+		if err := writeListMarketsResponse(w, response); err != nil {
 			log.Printf("Error encoding response: %v", err)
 			http.Error(w, "Error encoding response", http.StatusInternalServerError)
 		}
@@ -64,45 +56,19 @@ func parseListMarketsParams(r *http.Request) (listMarketsParams, error) {
 		return listMarketsParams{}, statusErr
 	}
 
-	limit := parseListLimit(r.URL.Query().Get("limit"))
-	offset := parseListOffset(r.URL.Query().Get("offset"))
-
-	return listMarketsParams{
-		status: status,
-		limit:  limit,
-		offset: offset,
-		filters: dmarkets.ListFilters{
-			Status: status,
-			Limit:  limit,
-			Offset: offset,
-		},
-		page: dmarkets.Page{
-			Limit:  limit,
-			Offset: offset,
-		},
-	}, nil
+	return newListMarketsParams(
+		status,
+		parseListLimit(r.URL.Query().Get("limit")),
+		parseListOffset(r.URL.Query().Get("offset")),
+	), nil
 }
 
 func parseListLimit(rawLimit string) int {
-	limit := 50
-	if rawLimit == "" {
-		return limit
-	}
-
-	if parsedLimit, err := strconv.Atoi(rawLimit); err == nil && parsedLimit > 0 && parsedLimit <= 100 {
-		return parsedLimit
-	}
-	return limit
+	return parseBoundedPositiveInt(rawLimit, 50, 100)
 }
 
 func parseListOffset(rawOffset string) int {
-	if rawOffset == "" {
-		return 0
-	}
-	if parsedOffset, err := strconv.Atoi(rawOffset); err == nil && parsedOffset >= 0 {
-		return parsedOffset
-	}
-	return 0
+	return parseNonNegativeInt(rawOffset, 0)
 }
 
 func fetchMarkets(r *http.Request, svc dmarkets.ServiceInterface, params listMarketsParams) ([]*dmarkets.Market, error) {
@@ -122,4 +88,25 @@ func writeListMarketsError(w http.ResponseWriter, err error) {
 		log.Printf("Error fetching markets: %v", err)
 		http.Error(w, "Error fetching markets", http.StatusInternalServerError)
 	}
+}
+
+func newListMarketsParams(status string, limit, offset int) listMarketsParams {
+	return listMarketsParams{
+		status: status,
+		limit:  limit,
+		offset: offset,
+		filters: dmarkets.ListFilters{
+			Status: status,
+			Limit:  limit,
+			Offset: offset,
+		},
+		page: dmarkets.Page{
+			Limit:  limit,
+			Offset: offset,
+		},
+	}
+}
+
+func writeListMarketsResponse(w http.ResponseWriter, response interface{}) error {
+	return writeJSONResponse(w, http.StatusOK, response)
 }

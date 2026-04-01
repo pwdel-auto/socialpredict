@@ -181,3 +181,22 @@ func TestSearchMarketsHandlerValidation(t *testing.T) {
 		}
 	})
 }
+
+func TestParseSearchRequestDefaultsAndAliases(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v0/markets/search?q=%20bitcoin%20&status=all&limit=bad&offset=-2", nil)
+
+	params, err := parseSearchRequest(req)
+	if err != nil {
+		t.Fatalf("parseSearchRequest returned error: %v", err)
+	}
+
+	if params.query != "bitcoin" {
+		t.Fatalf("expected sanitized query bitcoin, got %q", params.query)
+	}
+	if params.filters.Status != "" {
+		t.Fatalf("expected normalized all-status to empty filter, got %q", params.filters.Status)
+	}
+	if params.filters.Limit != 20 || params.filters.Offset != 0 {
+		t.Fatalf("unexpected pagination filters: %+v", params.filters)
+	}
+}

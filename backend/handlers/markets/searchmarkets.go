@@ -2,15 +2,12 @@ package marketshandlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
-	"strconv"
 
 	"socialpredict/handlers/markets/dto"
 	dmarkets "socialpredict/internal/domain/markets"
-	"socialpredict/security"
 )
 
 // SearchMarketsHandler handles HTTP requests for searching markets - HTTP-only with service injection
@@ -31,26 +28,11 @@ func SearchMarketsHandler(svc dmarkets.ServiceInterface) http.HandlerFunc {
 		// ms, err := h.service.SearchMarkets(r.Context(), q, f)
 		searchResults, err := svc.SearchMarkets(r.Context(), params.query, params.filters)
 		if err != nil {
-			// Map errors
-			switch err {
-			case dmarkets.ErrInvalidInput:
-				http.Error(w, "Invalid search parameters", http.StatusBadRequest)
-			default:
-				log.Printf("Error searching markets: %v", err)
-				http.Error(w, "Error searching markets", http.StatusInternalServerError)
-			}
+			writeSearchMarketsError(w, err)
 			return
 		}
 
-		response, buildErr := buildSearchResponse(r.Context(), svc, searchResults)
-		if buildErr != nil {
-			http.Error(w, buildErr.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Encode response
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(response); err != nil {
+		if err := writeSearchResponse(w, r.Context(), svc, searchResults); err != nil {
 			log.Printf("Error encoding search response: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
@@ -62,94 +44,64 @@ type searchRequestParams struct {
 	filters dmarkets.SearchFilters
 }
 
-type httpError struct {
-	message    string
-	statusCode int
-}
-
 func parseSearchRequest(r *http.Request) (searchRequestParams, *httpError) {
-	query := extractQuery(r)
+	query, queryErr := extractQuery(r)
+	if queryErr != nil {
+		return searchRequestParams{}, queryErr
+	}
+
 	status, statusErr := normalizeStatusParam(r.URL.Query().Get("status"))
 	if statusErr != nil {
-		return searchRequestParams{}, &httpError{message: statusErr.Error(), statusCode: http.StatusBadRequest}
-	}
-	if query == "" {
-		return searchRequestParams{}, &httpError{message: "Query parameter 'query' is required", statusCode: http.StatusBadRequest}
-	}
-
-	sanitizedQuery, sanitizeErr := sanitizeQuery(query)
-	if sanitizeErr != nil {
-		return searchRequestParams{}, sanitizeErr
+		return searchRequestParams{}, newHTTPError(http.StatusBadRequest, statusErr.Error())
 	}
 
 	filters := dmarkets.SearchFilters{
-		Status: status, // Can be empty, "active", "closed", "resolved", or "all"
+		Status: status,
 		Limit:  parseLimit(r.URL.Query().Get("limit")),
 		Offset: parseOffset(r.URL.Query().Get("offset")),
 	}
 
 	return searchRequestParams{
-		query:   sanitizedQuery,
+		query:   query,
 		filters: filters,
 	}, nil
 }
 
-func extractQuery(r *http.Request) string {
-	query := r.URL.Query().Get("query")
+func extractQuery(r *http.Request) (string, *httpError) {
+	query := firstQueryValue(r.URL.Query(), "query", "q")
 	if query == "" {
-		query = r.URL.Query().Get("q")
+		return "", newHTTPError(http.StatusBadRequest, "Query parameter 'query' is required")
 	}
-	return query
+
+	return sanitizeQuery(query)
 }
 
 func sanitizeQuery(query string) (string, *httpError) {
-	sanitizer := security.NewSanitizer()
-	sanitizedQuery, err := sanitizer.SanitizeMarketTitle(query)
+	sanitizedQuery, err := sanitizeMarketQuery(query)
 	if err != nil {
 		log.Printf("SearchMarketsHandler: Sanitization failed for query '%s': %v", query, err)
-		return "", &httpError{message: "Invalid search query: " + err.Error(), statusCode: http.StatusBadRequest}
-	}
-	if len(sanitizedQuery) > 100 {
-		return "", &httpError{message: "Query too long (max 100 characters)", statusCode: http.StatusBadRequest}
+		return "", err
 	}
 	return sanitizedQuery, nil
 }
 
 func parseLimit(rawLimit string) int {
-	limit := 20 // Default
-	if rawLimit == "" {
-		return limit
-	}
-
-	parsedLimit, err := strconv.Atoi(rawLimit)
-	if err != nil || parsedLimit <= 0 || parsedLimit > 50 {
-		return limit
-	}
-	return parsedLimit
+	return parseBoundedPositiveInt(rawLimit, 20, 50)
 }
 
 func parseOffset(rawOffset string) int {
-	if rawOffset == "" {
-		return 0
-	}
-	parsedOffset, err := strconv.Atoi(rawOffset)
-	if err != nil || parsedOffset < 0 {
-		return 0
-	}
-	return parsedOffset
+	return parseNonNegativeInt(rawOffset, 0)
 }
 
 func buildSearchResponse(ctx context.Context, svc dmarkets.ServiceInterface, searchResults *dmarkets.SearchResults) (dto.SearchResponse, error) {
-	primaryOverviews, err := buildMarketOverviewResponses(ctx, svc, searchResults.PrimaryResults)
+	primaryOverviews, err := buildSearchResultOverviews(ctx, svc, searchResults.PrimaryResults, "primary")
 	if err != nil {
-		log.Printf("Error building primary results: %v", err)
-		return dto.SearchResponse{}, errors.New("Error building primary results")
+		return dto.SearchResponse{}, err
 	}
 
-	fallbackOverviews, err := buildMarketOverviewResponses(ctx, svc, searchResults.FallbackResults)
+	fallbackOverviews, err := buildSearchResultOverviews(ctx, svc, searchResults.FallbackResults, "fallback")
 	if err != nil {
-		log.Printf("Error building fallback results: %v", err)
-		return dto.SearchResponse{}, errors.New("Error building fallback results")
+		return dto.SearchResponse{}, err
 	}
 
 	return dto.SearchResponse{
@@ -162,4 +114,33 @@ func buildSearchResponse(ctx context.Context, svc dmarkets.ServiceInterface, sea
 		TotalCount:      searchResults.TotalCount,
 		FallbackUsed:    searchResults.FallbackUsed,
 	}, nil
+}
+
+func buildSearchResultOverviews(ctx context.Context, svc dmarkets.ServiceInterface, markets []*dmarkets.Market, resultType string) ([]*dto.MarketOverviewResponse, error) {
+	overviews, err := buildMarketOverviewResponses(ctx, svc, markets)
+	if err != nil {
+		log.Printf("Error building %s results: %v", resultType, err)
+		return nil, errors.New("Error building " + resultType + " results")
+	}
+
+	return overviews, nil
+}
+
+func writeSearchResponse(w http.ResponseWriter, ctx context.Context, svc dmarkets.ServiceInterface, searchResults *dmarkets.SearchResults) error {
+	response, err := buildSearchResponse(ctx, svc, searchResults)
+	if err != nil {
+		return err
+	}
+
+	return writeJSONResponse(w, http.StatusOK, response)
+}
+
+func writeSearchMarketsError(w http.ResponseWriter, err error) {
+	switch err {
+	case dmarkets.ErrInvalidInput:
+		http.Error(w, "Invalid search parameters", http.StatusBadRequest)
+	default:
+		log.Printf("Error searching markets: %v", err)
+		http.Error(w, "Error searching markets", http.StatusInternalServerError)
+	}
 }
