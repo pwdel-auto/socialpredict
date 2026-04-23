@@ -7,18 +7,6 @@ import (
 
 type FailureReason string
 
-const (
-	ReasonMethodNotAllowed       FailureReason = "METHOD_NOT_ALLOWED"
-	ReasonInvalidRequest         FailureReason = "INVALID_REQUEST"
-	ReasonInvalidToken           FailureReason = "INVALID_TOKEN"
-	ReasonPasswordChangeRequired FailureReason = "PASSWORD_CHANGE_REQUIRED"
-	ReasonUserNotFound           FailureReason = "USER_NOT_FOUND"
-	ReasonMarketNotFound         FailureReason = "MARKET_NOT_FOUND"
-
-	ReasonValidationFailed FailureReason = "VALIDATION_FAILED"
-	ReasonInternalError    FailureReason = "INTERNAL_ERROR"
-)
-
 type SuccessEnvelope[T any] struct {
 	OK     bool `json:"ok"`
 	Result T    `json:"result"`

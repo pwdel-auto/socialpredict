@@ -2,10 +2,10 @@ package usershandlers
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"socialpredict/handlers"
+	"socialpredict/handlers/failurereason"
 	"socialpredict/handlers/users/dto"
 	dusers "socialpredict/internal/domain/users"
 	authsvc "socialpredict/internal/service/auth"
@@ -20,7 +20,7 @@ type changePasswordResult struct {
 func ChangePasswordHandler(svc dusers.ServiceInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			_ = handlers.WriteFailure(w, http.StatusMethodNotAllowed, handlers.FailureReason("METHOD_NOT_ALLOWED"))
+			_ = handlers.WriteFailure(w, http.StatusMethodNotAllowed, handlers.ReasonMethodNotAllowed)
 			return
 		}
 
@@ -28,14 +28,14 @@ func ChangePasswordHandler(svc dusers.ServiceInterface) http.HandlerFunc {
 
 		user, httperr := authsvc.ValidateTokenAndGetUser(r, svc)
 		if httperr != nil {
-			_ = handlers.WriteFailure(w, httperr.StatusCode, handlers.FailureReason("INVALID_TOKEN"))
+			_ = handlers.WriteFailure(w, httperr.StatusCode, failurereason.FromAuthHTTPError(httperr))
 			logger.LogError("ChangePassword", "ValidateTokenAndGetUser", httperr)
 			return
 		}
 
 		var req dto.ChangePasswordRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			_ = handlers.WriteFailure(w, http.StatusBadRequest, handlers.FailureReason("INVALID_REQUEST"))
+			_ = handlers.WriteFailure(w, http.StatusBadRequest, handlers.ReasonInvalidRequest)
 			logger.LogError("ChangePassword", "DecodeRequestBody", err)
 			return
 		}
@@ -54,16 +54,6 @@ func ChangePasswordHandler(svc dusers.ServiceInterface) http.HandlerFunc {
 }
 
 func writeChangePasswordError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, dusers.ErrUserNotFound):
-		_ = handlers.WriteFailure(w, http.StatusNotFound, handlers.FailureReason("USER_NOT_FOUND"))
-	case errors.Is(err, dusers.ErrInvalidCredentials):
-		_ = handlers.WriteFailure(w, http.StatusUnauthorized, handlers.FailureReason("INVALID_CREDENTIALS"))
-	default:
-		if isValidationError(err.Error()) {
-			_ = handlers.WriteFailure(w, http.StatusBadRequest, handlers.FailureReason("VALIDATION_FAILED"))
-			return
-		}
-		_ = handlers.WriteFailure(w, http.StatusInternalServerError, handlers.ReasonInternalError)
-	}
+	statusCode, reason := failurereason.FromUserError(err)
+	_ = handlers.WriteFailure(w, statusCode, reason)
 }

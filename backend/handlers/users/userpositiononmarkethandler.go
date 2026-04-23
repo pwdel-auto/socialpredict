@@ -7,6 +7,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"socialpredict/handlers"
+	positionshandlers "socialpredict/handlers/positions"
 
 	dmarkets "socialpredict/internal/domain/markets"
 	dusers "socialpredict/internal/domain/users"
@@ -40,7 +41,7 @@ func UserMarketPositionHandlerWithService(marketSvc dmarkets.ServiceInterface, u
 			return
 		}
 
-		if err := handlers.WriteResult(w, http.StatusOK, position); err != nil {
+		if err := handlers.WriteResult(w, http.StatusOK, positionshandlers.NewUserPositionResponse(position)); err != nil {
 			_ = handlers.WriteFailure(w, http.StatusInternalServerError, handlers.ReasonInternalError)
 		}
 	}
@@ -61,9 +62,9 @@ func parseMarketID(marketIDStr string) (int64, error) {
 func writeUserPositionError(w http.ResponseWriter, marketID int64, username string, err error) {
 	switch err {
 	case dmarkets.ErrMarketNotFound:
-		_ = handlers.WriteFailure(w, http.StatusNotFound, "MARKET_NOT_FOUND")
+		_ = handlers.WriteFailure(w, http.StatusNotFound, handlers.ReasonNotFound)
 	case dmarkets.ErrUserNotFound:
-		_ = handlers.WriteFailure(w, http.StatusNotFound, "USER_NOT_FOUND")
+		_ = handlers.WriteFailure(w, http.StatusNotFound, handlers.ReasonNotFound)
 	case dmarkets.ErrInvalidInput:
 		_ = handlers.WriteFailure(w, http.StatusBadRequest, handlers.ReasonInvalidRequest)
 	default:

@@ -6,14 +6,8 @@ import (
 	"net/http"
 	"socialpredict/handlers"
 	"socialpredict/handlers/cms/homepage"
+	"socialpredict/handlers/failurereason"
 	authsvc "socialpredict/internal/service/auth"
-)
-
-const (
-	reasonHomepageAuthUnavailable handlers.FailureReason = "AUTH_SERVICE_UNAVAILABLE"
-	reasonHomepageAdminRequired   handlers.FailureReason = "ADMIN_REQUIRED"
-	reasonHomepageUpdateFailed    handlers.FailureReason = "HOMEPAGE_UPDATE_FAILED"
-	reasonHomepageNotFound        handlers.FailureReason = "HOME_CONTENT_NOT_FOUND"
 )
 
 type Handler struct {
@@ -28,7 +22,7 @@ func NewHandler(svc *homepage.Service, auth authsvc.Authenticator) *Handler {
 func (h *Handler) PublicGet(w http.ResponseWriter, r *http.Request) {
 	item, err := h.svc.GetHome()
 	if err != nil {
-		_ = handlers.WriteFailure(w, http.StatusNotFound, reasonHomepageNotFound)
+		_ = handlers.WriteFailure(w, http.StatusNotFound, handlers.ReasonNotFound)
 		return
 	}
 
@@ -53,7 +47,7 @@ type updateReq struct {
 func (h *Handler) AdminUpdate(w http.ResponseWriter, r *http.Request) {
 	// Validate admin access
 	if h.auth == nil {
-		_ = handlers.WriteFailure(w, http.StatusInternalServerError, reasonHomepageAuthUnavailable)
+		_ = handlers.WriteFailure(w, http.StatusInternalServerError, handlers.ReasonInternalError)
 		return
 	}
 	admin, httpErr := h.auth.RequireAdmin(r)
@@ -77,7 +71,7 @@ func (h *Handler) AdminUpdate(w http.ResponseWriter, r *http.Request) {
 		UpdatedBy: admin.Username,
 	})
 	if err != nil {
-		_ = handlers.WriteFailure(w, http.StatusBadRequest, reasonHomepageUpdateFailed)
+		_ = handlers.WriteFailure(w, http.StatusBadRequest, handlers.ReasonValidationFailed)
 		return
 	}
 
@@ -93,7 +87,7 @@ func (h *Handler) AdminUpdate(w http.ResponseWriter, r *http.Request) {
 func RequireAdmin(auth authsvc.Authenticator, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if auth == nil {
-			_ = handlers.WriteFailure(w, http.StatusInternalServerError, reasonHomepageAuthUnavailable)
+			_ = handlers.WriteFailure(w, http.StatusInternalServerError, handlers.ReasonInternalError)
 			return
 		}
 		if _, httpErr := auth.RequireAdmin(r); httpErr != nil {
@@ -112,21 +106,5 @@ func UsernameFromContext(ctx context.Context) string {
 }
 
 func reasonFromAdminAuthError(err *authsvc.HTTPError) handlers.FailureReason {
-	if err == nil {
-		return handlers.ReasonInternalError
-	}
-
-	switch err.Message {
-	case "Authorization header is required", "Invalid token":
-		return handlers.ReasonInvalidToken
-	case "admin privileges required":
-		return reasonHomepageAdminRequired
-	case "User not found":
-		return handlers.ReasonUserNotFound
-	default:
-		if err.StatusCode >= http.StatusInternalServerError {
-			return handlers.ReasonInternalError
-		}
-		return handlers.ReasonInvalidToken
-	}
+	return failurereason.FromAuthHTTPError(err)
 }

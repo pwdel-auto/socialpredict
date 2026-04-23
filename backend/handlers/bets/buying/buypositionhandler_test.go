@@ -37,12 +37,16 @@ func (f *fakeBetsService) Sell(ctx context.Context, req bets.SellRequest) (*bets
 
 type fakeUsersService struct {
 	user *dusers.User
+	err  error
 }
 
 func (f *fakeUsersService) GetPublicUser(ctx context.Context, username string) (*dusers.PublicUser, error) {
 	return nil, nil
 }
 func (f *fakeUsersService) GetUser(ctx context.Context, username string) (*dusers.User, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.user, nil
 }
 func (f *fakeUsersService) GetPrivateProfile(ctx context.Context, username string) (*dusers.PrivateProfile, error) {
@@ -158,10 +162,11 @@ func TestPlaceBetHandler_ErrorMapping(t *testing.T) {
 		wantStatus int
 		wantReason string
 	}{
-		{"invalid outcome", bets.ErrInvalidOutcome, http.StatusBadRequest, "BET_VALIDATION_FAILED"},
-		{"insufficient", bets.ErrInsufficientBalance, http.StatusUnprocessableEntity, "INSUFFICIENT_BALANCE"},
-		{"market closed", bets.ErrMarketClosed, http.StatusConflict, "MARKET_CLOSED"},
-		{"not found", dmarkets.ErrMarketNotFound, http.StatusNotFound, "MARKET_NOT_FOUND"},
+		{"invalid outcome", bets.ErrInvalidOutcome, http.StatusBadRequest, string(handlers.ReasonInvalidOutcome)},
+		{"invalid amount", bets.ErrInvalidAmount, http.StatusBadRequest, string(handlers.ReasonValidationFailed)},
+		{"insufficient", bets.ErrInsufficientBalance, http.StatusUnprocessableEntity, string(handlers.ReasonInsufficientBalance)},
+		{"market closed", bets.ErrMarketClosed, http.StatusConflict, string(handlers.ReasonMarketClosed)},
+		{"not found", dmarkets.ErrMarketNotFound, http.StatusNotFound, string(handlers.ReasonNotFound)},
 	}
 
 	for _, tc := range cases {
@@ -219,5 +224,71 @@ func TestPlaceBetHandler_InvalidJSON(t *testing.T) {
 	}
 	if resp.Reason != string(handlers.ReasonInvalidRequest) {
 		t.Fatalf("expected reason %q, got %q", handlers.ReasonInvalidRequest, resp.Reason)
+	}
+}
+
+func TestPlaceBetHandler_AuthFailureMapping(t *testing.T) {
+	t.Setenv("JWT_SIGNING_KEY", "test-secret-key-for-testing")
+
+	cases := []struct {
+		name       string
+		usersSvc   *fakeUsersService
+		token      string
+		wantStatus int
+		wantReason string
+	}{
+		{
+			name:       "missing authorization header",
+			usersSvc:   &fakeUsersService{},
+			wantStatus: http.StatusUnauthorized,
+			wantReason: string(handlers.ReasonAuthenticationRequired),
+		},
+		{
+			name:       "password change required",
+			usersSvc:   &fakeUsersService{user: &dusers.User{Username: "alice", MustChangePassword: true}},
+			token:      modelstesting.GenerateValidJWT("alice"),
+			wantStatus: http.StatusForbidden,
+			wantReason: string(handlers.ReasonPasswordChangeRequired),
+		},
+		{
+			name:       "authenticated user missing",
+			usersSvc:   &fakeUsersService{err: dusers.ErrUserNotFound},
+			token:      modelstesting.GenerateValidJWT("alice"),
+			wantStatus: http.StatusNotFound,
+			wantReason: string(handlers.ReasonNotFound),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			betsSvc := &fakeBetsService{}
+			payload := dto.PlaceBetRequest{MarketID: 1, Amount: 10, Outcome: "YES"}
+			body, _ := json.Marshal(payload)
+
+			req := httptest.NewRequest(http.MethodPost, "/v0/bet", bytes.NewReader(body))
+			if tc.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			rr := httptest.NewRecorder()
+			handler := PlaceBetHandler(betsSvc, tc.usersSvc)
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("expected status %d, got %d", tc.wantStatus, rr.Code)
+			}
+
+			var resp handlers.FailureEnvelope
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode failure envelope: %v", err)
+			}
+			if resp.OK {
+				t.Fatalf("expected ok=false, got true")
+			}
+			if resp.Reason != tc.wantReason {
+				t.Fatalf("expected reason %q, got %q", tc.wantReason, resp.Reason)
+			}
+		})
 	}
 }

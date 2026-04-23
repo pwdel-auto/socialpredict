@@ -6,6 +6,8 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"socialpredict/handlers"
+	"socialpredict/handlers/failurereason"
 	"socialpredict/handlers/users/dto"
 	dusers "socialpredict/internal/domain/users"
 )
@@ -14,13 +16,13 @@ import (
 func GetUserCreditHandler(svc dusers.ServiceInterface, maximumDebtAllowed int64) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			http.Error(w, "Method is not supported.", http.StatusMethodNotAllowed)
+			_ = handlers.WriteFailure(w, http.StatusMethodNotAllowed, handlers.ReasonMethodNotAllowed)
 			return
 		}
 
 		username := mux.Vars(r)["username"]
 		if username == "" {
-			http.Error(w, "username is required", http.StatusBadRequest)
+			_ = handlers.WriteFailure(w, http.StatusBadRequest, handlers.ReasonInvalidRequest)
 			return
 		}
 
@@ -30,7 +32,8 @@ func GetUserCreditHandler(svc dusers.ServiceInterface, maximumDebtAllowed int64)
 				// Maintain legacy behavior: treat missing users as zero-account and return max debt.
 				credit = maximumDebtAllowed
 			} else {
-				http.Error(w, "failed to calculate user credit", http.StatusInternalServerError)
+				statusCode, reason := failurereason.FromUserError(err)
+				_ = handlers.WriteFailure(w, statusCode, reason)
 				return
 			}
 		}
@@ -38,7 +41,7 @@ func GetUserCreditHandler(svc dusers.ServiceInterface, maximumDebtAllowed int64)
 		response := dto.UserCreditResponse{Credit: credit}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			_ = handlers.WriteFailure(w, http.StatusInternalServerError, handlers.ReasonInternalError)
 		}
 	}
 }

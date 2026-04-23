@@ -7,17 +7,11 @@ import (
 
 	"socialpredict/handlers"
 	"socialpredict/handlers/bets/dto"
+	"socialpredict/handlers/failurereason"
 	dbets "socialpredict/internal/domain/bets"
 	dmarkets "socialpredict/internal/domain/markets"
 	dusers "socialpredict/internal/domain/users"
 	authsvc "socialpredict/internal/service/auth"
-)
-
-const (
-	reasonBetValidationFailed handlers.FailureReason = "BET_VALIDATION_FAILED"
-	reasonMarketClosed        handlers.FailureReason = "MARKET_CLOSED"
-	reasonInsufficientBalance handlers.FailureReason = "INSUFFICIENT_BALANCE"
-	reasonMarketNotFound      handlers.FailureReason = "MARKET_NOT_FOUND"
 )
 
 // PlaceBetHandler returns an HTTP handler that delegates bet placement to the bets domain service.
@@ -69,14 +63,16 @@ func toPlaceRequest(req dto.PlaceBetRequest, username string) dbets.PlaceRequest
 
 func writePlaceBetError(w http.ResponseWriter, err error) {
 	switch err {
-	case dbets.ErrInvalidOutcome, dbets.ErrInvalidAmount:
-		_ = handlers.WriteFailure(w, http.StatusBadRequest, reasonBetValidationFailed)
+	case dbets.ErrInvalidOutcome:
+		_ = handlers.WriteFailure(w, http.StatusBadRequest, handlers.ReasonInvalidOutcome)
+	case dbets.ErrInvalidAmount:
+		_ = handlers.WriteFailure(w, http.StatusBadRequest, handlers.ReasonValidationFailed)
 	case dbets.ErrMarketClosed:
-		_ = handlers.WriteFailure(w, http.StatusConflict, reasonMarketClosed)
+		_ = handlers.WriteFailure(w, http.StatusConflict, handlers.ReasonMarketClosed)
 	case dbets.ErrInsufficientBalance:
-		_ = handlers.WriteFailure(w, http.StatusUnprocessableEntity, reasonInsufficientBalance)
+		_ = handlers.WriteFailure(w, http.StatusUnprocessableEntity, handlers.ReasonInsufficientBalance)
 	case dmarkets.ErrMarketNotFound:
-		_ = handlers.WriteFailure(w, http.StatusNotFound, reasonMarketNotFound)
+		_ = handlers.WriteFailure(w, http.StatusNotFound, handlers.ReasonNotFound)
 	default:
 		_ = handlers.WriteFailure(w, http.StatusInternalServerError, handlers.ReasonInternalError)
 	}
@@ -95,21 +91,5 @@ func writePlaceBetResponse(w http.ResponseWriter, placedBet *dbets.PlacedBet) {
 }
 
 func reasonFromAuthError(err *authsvc.HTTPError) handlers.FailureReason {
-	if err == nil {
-		return handlers.ReasonInternalError
-	}
-
-	switch err.Message {
-	case "Authorization header is required", "Invalid token":
-		return handlers.ReasonInvalidToken
-	case "Password change required":
-		return handlers.ReasonPasswordChangeRequired
-	case "User not found":
-		return handlers.ReasonUserNotFound
-	default:
-		if err.StatusCode >= http.StatusInternalServerError {
-			return handlers.ReasonInternalError
-		}
-		return handlers.ReasonInvalidToken
-	}
+	return failurereason.FromAuthHTTPError(err)
 }

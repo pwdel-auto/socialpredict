@@ -2,6 +2,7 @@ package server
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -95,12 +96,31 @@ func buildCORSFromEnv() *cors.Cors {
 	})
 }
 
-func Start(openAPISpec []byte, swaggerUIFS embed.FS, db *gorm.DB, configService configsvc.Service) {
+func buildHandler(openAPISpec []byte, swaggerUIFS fs.FS, db *gorm.DB, configService configsvc.Service) (http.Handler, error) {
 	// Initialize security service
 	securityService := security.NewSecurityService()
 
 	// CORS handler (configurable via env)
 	c := buildCORSFromEnv()
+
+	router, err := buildRouter(openAPISpec, swaggerUIFS, db, configService, securityService)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply CORS middleware if enabled
+	handler := http.Handler(router)
+	if c != nil {
+		handler = c.Handler(handler)
+	}
+
+	return handler, nil
+}
+
+func buildRouter(openAPISpec []byte, swaggerUIFS fs.FS, db *gorm.DB, configService configsvc.Service, securityService *security.SecurityService) (*mux.Router, error) {
+	if configService == nil {
+		return nil, fmt.Errorf("config init: configuration service unavailable")
+	}
 
 	// Initialize mux router
 	router := mux.NewRouter()
@@ -122,19 +142,14 @@ func Start(openAPISpec []byte, swaggerUIFS embed.FS, db *gorm.DB, configService 
 	// Redirect /swagger -> /swagger/
 	router.HandleFunc("/swagger", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/swagger/", http.StatusMovedPermanently)
-	})
+	}).Methods(http.MethodGet)
 	// File server rooted at swagger-ui/
 	uiFS, err := fs.Sub(swaggerUIFS, "swagger-ui")
 	if err != nil {
-		log.Fatalf("failed to set up swagger-ui FS: %v", err)
+		return nil, fmt.Errorf("set up swagger-ui FS: %w", err)
 	}
 	swaggerHandler := http.FileServer(http.FS(uiFS))
-	router.PathPrefix("/swagger/").Handler(http.StripPrefix("/swagger/", swaggerHandler))
-
-	// Initialize domain services
-	if configService == nil {
-		log.Fatal("config init: configuration service unavailable")
-	}
+	router.PathPrefix("/swagger/").Methods(http.MethodGet).Handler(http.StripPrefix("/swagger/", swaggerHandler))
 
 	container := app.BuildApplicationWithConfigService(db, configService)
 	marketsService := container.GetMarketsService()
@@ -172,12 +187,9 @@ func Start(openAPISpec []byte, swaggerUIFS embed.FS, db *gorm.DB, configService 
 		rWithStatus := mux.SetURLVars(r, map[string]string{"status": "all"})
 		marketsHandler.ListByStatus(w, rWithStatus)
 	}))).Methods("GET")
-	router.Handle("/v0/markets/{id}", securityMiddleware(http.HandlerFunc(marketsHandler.GetDetails))).Methods("GET")
-	router.Handle("/v0/markets/{id}/resolve", securityMiddleware(http.HandlerFunc(marketsHandler.ResolveMarket))).Methods("POST")
-	router.Handle("/v0/markets/{id}/leaderboard", securityMiddleware(http.HandlerFunc(marketsHandler.MarketLeaderboard))).Methods("GET")
-	router.Handle("/v0/markets/{id}/projection", securityMiddleware(http.HandlerFunc(marketsHandler.ProjectProbability))).Methods("GET")
 
-	// Legacy routes for backward compatibility — rewrite to new handler with status query
+	// Static legacy aliases must be registered before /v0/markets/{id} or mux
+	// will route them into the market-details handler.
 	router.Handle("/v0/markets/active", securityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		q.Set("status", "active")
@@ -196,6 +208,10 @@ func Start(openAPISpec []byte, swaggerUIFS embed.FS, db *gorm.DB, configService 
 		r.URL.RawQuery = q.Encode()
 		marketsHandler.ListMarkets(w, r)
 	}))).Methods("GET")
+	router.Handle("/v0/markets/{id}", securityMiddleware(http.HandlerFunc(marketsHandler.GetDetails))).Methods("GET")
+	router.Handle("/v0/markets/{id}/resolve", securityMiddleware(http.HandlerFunc(marketsHandler.ResolveMarket))).Methods("POST")
+	router.Handle("/v0/markets/{id}/leaderboard", securityMiddleware(http.HandlerFunc(marketsHandler.MarketLeaderboard))).Methods("GET")
+	router.Handle("/v0/markets/{id}/projection", securityMiddleware(http.HandlerFunc(marketsHandler.ProjectProbability))).Methods("GET")
 	router.Handle("/v0/marketprojection/{marketId}/{amount}/{outcome}", securityMiddleware(marketshandlers.ProjectNewProbabilityHandler(marketsService))).Methods("GET")
 	router.Handle("/v0/marketprojection/{marketId}/{amount}/{outcome}/", securityMiddleware(marketshandlers.ProjectNewProbabilityHandler(marketsService))).Methods("GET")
 
@@ -237,10 +253,13 @@ func Start(openAPISpec []byte, swaggerUIFS embed.FS, db *gorm.DB, configService 
 	router.HandleFunc("/v0/content/home", homepageHandler.PublicGet).Methods("GET")
 	router.Handle("/v0/admin/content/home", securityMiddleware(http.HandlerFunc(homepageHandler.AdminUpdate))).Methods("PUT")
 
-	// Apply CORS middleware if enabled
-	handler := http.Handler(router)
-	if c != nil {
-		handler = c.Handler(handler)
+	return router, nil
+}
+
+func Start(openAPISpec []byte, swaggerUIFS embed.FS, db *gorm.DB, configService configsvc.Service) {
+	handler, err := buildHandler(openAPISpec, swaggerUIFS, db, configService)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	// Allow BACKEND_PORT to be configured via environment, default to 8080

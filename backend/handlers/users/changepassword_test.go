@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"socialpredict/handlers"
 	"socialpredict/internal/app"
 	configsvc "socialpredict/internal/service/config"
 	"socialpredict/models/modelstesting"
@@ -337,8 +338,8 @@ func TestChangePasswordHandler_InvalidTokenReturnsFailureEnvelope(t *testing.T) 
 	if response.OK {
 		t.Fatalf("expected ok=false")
 	}
-	if response.Reason != "INVALID_TOKEN" {
-		t.Fatalf("expected reason INVALID_TOKEN, got %q", response.Reason)
+	if response.Reason != string(handlers.ReasonAuthenticationRequired) {
+		t.Fatalf("expected reason %q, got %q", handlers.ReasonAuthenticationRequired, response.Reason)
 	}
 }
 

@@ -46,7 +46,7 @@ type loginResponse struct {
 func LoginHandler(users LoginUserRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			_ = writeLoginFailure(w, http.StatusNotFound, handlers.FailureReason("METHOD_NOT_ALLOWED"))
+			_ = writeLoginFailure(w, http.StatusMethodNotAllowed, handlers.ReasonMethodNotAllowed)
 			return
 		}
 
@@ -54,13 +54,13 @@ func LoginHandler(users LoginUserRepository) http.HandlerFunc {
 
 		req, err := decodeLoginRequest(r)
 		if err != nil {
-			_ = writeLoginFailure(w, http.StatusBadRequest, handlers.FailureReason("INVALID_REQUEST"))
+			_ = writeLoginFailure(w, http.StatusBadRequest, handlers.ReasonInvalidRequest)
 			return
 		}
 
 		req, err = validateAndSanitizeLogin(securityService, req)
 		if err != nil {
-			_ = writeLoginFailure(w, http.StatusBadRequest, handlers.FailureReason("INVALID_REQUEST"))
+			_ = writeLoginFailure(w, http.StatusBadRequest, handlers.ReasonInvalidRequest)
 			return
 		}
 
@@ -194,10 +194,10 @@ func writeLoginFailure(w http.ResponseWriter, statusCode int, reason handlers.Fa
 func loginFailureReason(statusCode int) handlers.FailureReason {
 	switch statusCode {
 	case http.StatusBadRequest:
-		return handlers.FailureReason("INVALID_REQUEST")
+		return handlers.ReasonInvalidRequest
 	case http.StatusUnauthorized:
-		return handlers.FailureReason("INVALID_CREDENTIALS")
+		return handlers.ReasonInvalidCredentials
 	default:
-		return handlers.FailureReason("AUTH_INTERNAL_ERROR")
+		return handlers.ReasonInternalError
 	}
 }

@@ -53,6 +53,12 @@ func TestGetPrivateProfileUserResponse_Success(t *testing.T) {
 	if resp.Email != user.PrivateUser.Email {
 		t.Fatalf("expected email %q, got %q", user.PrivateUser.Email, resp.Email)
 	}
+	if resp.APIKey != user.PrivateUser.APIKey {
+		t.Fatalf("expected apiKey %q, got %q", user.PrivateUser.APIKey, resp.APIKey)
+	}
+	if resp.MustChangePassword {
+		t.Fatal("expected mustChangePassword=false in private response")
+	}
 }
 
 func TestGetPrivateProfileUserResponse_Unauthorized(t *testing.T) {
@@ -75,8 +81,8 @@ func TestGetPrivateProfileUserResponse_Unauthorized(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
 		t.Fatalf("failed to decode failure envelope: %v", err)
 	}
-	if envelope.OK || envelope.Reason != string(handlers.ReasonInvalidToken) {
-		t.Fatalf("expected invalid token envelope, got %+v", envelope)
+	if envelope.OK || envelope.Reason != string(handlers.ReasonAuthenticationRequired) {
+		t.Fatalf("expected authentication-required envelope, got %+v", envelope)
 	}
 }
 

@@ -12,11 +12,6 @@ import (
 	"github.com/gorilla/mux"
 )
 
-const (
-	reasonPositionsMarketNotFound handlers.FailureReason = "MARKET_NOT_FOUND"
-	reasonPositionsUserNotFound   handlers.FailureReason = "USER_NOT_FOUND"
-)
-
 // MarketPositionsHandlerWithService creates a service-injected positions handler for all users
 func MarketPositionsHandlerWithService(svc dmarkets.ServiceInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +61,7 @@ func MarketUserPositionHandlerWithService(svc dmarkets.ServiceInterface) http.Ha
 			return
 		}
 
-		if err := handlers.WriteResult(w, http.StatusOK, newUserPositionResponse(position)); err != nil {
+		if err := handlers.WriteResult(w, http.StatusOK, NewUserPositionResponse(position)); err != nil {
 			log.Printf("Error encoding user position response: %v", err)
 			_ = handlers.WriteFailure(w, http.StatusInternalServerError, handlers.ReasonInternalError)
 		}
@@ -88,7 +83,7 @@ func parseMarketID(marketIDStr string) (int64, error) {
 func writePositionsError(w http.ResponseWriter, marketID int64, err error) {
 	switch err {
 	case dmarkets.ErrMarketNotFound:
-		_ = handlers.WriteFailure(w, http.StatusNotFound, reasonPositionsMarketNotFound)
+		_ = handlers.WriteFailure(w, http.StatusNotFound, handlers.ReasonNotFound)
 	case dmarkets.ErrInvalidInput:
 		_ = handlers.WriteFailure(w, http.StatusBadRequest, handlers.ReasonInvalidRequest)
 	default:
@@ -97,13 +92,13 @@ func writePositionsError(w http.ResponseWriter, marketID int64, err error) {
 	}
 }
 
-func mapPositionsToResponses(positions []*dmarkets.UserPosition) []userPositionResponse {
-	responses := make([]userPositionResponse, 0, len(positions))
+func mapPositionsToResponses(positions []*dmarkets.UserPosition) []UserPositionResponse {
+	responses := make([]UserPositionResponse, 0, len(positions))
 	for _, pos := range positions {
 		if pos == nil {
 			continue
 		}
-		responses = append(responses, newUserPositionResponse(pos))
+		responses = append(responses, NewUserPositionResponse(pos))
 	}
 	return responses
 }
@@ -125,9 +120,9 @@ func parseMarketUserParams(vars map[string]string) (int64, string, error) {
 func writeUserPositionError(w http.ResponseWriter, marketID int64, username string, err error) {
 	switch err {
 	case dmarkets.ErrMarketNotFound:
-		_ = handlers.WriteFailure(w, http.StatusNotFound, reasonPositionsMarketNotFound)
+		_ = handlers.WriteFailure(w, http.StatusNotFound, handlers.ReasonNotFound)
 	case dmarkets.ErrUserNotFound:
-		_ = handlers.WriteFailure(w, http.StatusNotFound, reasonPositionsUserNotFound)
+		_ = handlers.WriteFailure(w, http.StatusNotFound, handlers.ReasonNotFound)
 	case dmarkets.ErrInvalidInput:
 		_ = handlers.WriteFailure(w, http.StatusBadRequest, handlers.ReasonInvalidRequest)
 	default:

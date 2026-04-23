@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"socialpredict/handlers"
+	"socialpredict/handlers/failurereason"
 	"socialpredict/handlers/users/dto"
 	dusers "socialpredict/internal/domain/users"
 	authsvc "socialpredict/internal/service/auth"
@@ -13,37 +14,18 @@ func GetPrivateProfileHandler(svc dusers.ServiceInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, httperr := authsvc.ValidateUserAndEnforcePasswordChangeGetUser(r, svc)
 		if httperr != nil {
-			_ = handlers.WriteFailure(w, httperr.StatusCode, authFailureReason(httperr))
+			_ = handlers.WriteFailure(w, httperr.StatusCode, failurereason.FromAuthHTTPError(httperr))
 			return
 		}
 
 		profile, err := svc.GetPrivateProfile(r.Context(), user.Username)
 		if err != nil {
-			if err == dusers.ErrUserNotFound {
-				_ = handlers.WriteFailure(w, http.StatusNotFound, handlers.ReasonUserNotFound)
-				return
-			}
-			_ = handlers.WriteFailure(w, http.StatusInternalServerError, handlers.ReasonInternalError)
+			statusCode, reason := failurereason.FromUserError(err)
+			_ = handlers.WriteFailure(w, statusCode, reason)
 			return
 		}
 
 		_ = handlers.WriteResult(w, http.StatusOK, privateProfileResponse(profile))
-	}
-}
-
-func authFailureReason(err *authsvc.HTTPError) handlers.FailureReason {
-	if err == nil {
-		return handlers.ReasonInternalError
-	}
-	switch err.StatusCode {
-	case http.StatusUnauthorized:
-		return handlers.ReasonInvalidToken
-	case http.StatusForbidden:
-		return handlers.ReasonPasswordChangeRequired
-	case http.StatusNotFound:
-		return handlers.ReasonUserNotFound
-	default:
-		return handlers.ReasonInternalError
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"socialpredict/handlers"
 	"socialpredict/models/modelstesting"
 	"testing"
 	"time"
@@ -182,12 +183,12 @@ func TestLoginHandler_MethodValidation(t *testing.T) {
 		{
 			name:           "Invalid GET method",
 			method:         http.MethodGet,
-			expectedStatus: http.StatusNotFound,
+			expectedStatus: http.StatusMethodNotAllowed,
 		},
 		{
 			name:           "Invalid PUT method",
 			method:         http.MethodPut,
-			expectedStatus: http.StatusNotFound,
+			expectedStatus: http.StatusMethodNotAllowed,
 		},
 	}
 
@@ -292,6 +293,51 @@ func TestLoginHandler_MissingDB(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("Expected status code %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+
+	var response handlers.FailureEnvelope
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.OK {
+		t.Fatalf("expected ok=false")
+	}
+	if response.Reason != string(handlers.ReasonInternalError) {
+		t.Fatalf("expected reason %q, got %q", handlers.ReasonInternalError, response.Reason)
+	}
+}
+
+func TestLoginHandler_MissingSigningKeyReturnsFailureEnvelope(t *testing.T) {
+	db := modelstesting.NewFakeDB(t)
+	repo := rusers.NewGormRepository(db)
+	t.Setenv("JWT_SIGNING_KEY", "")
+
+	testUser := modelstesting.GenerateUser("testuser", 1000)
+	if err := testUser.HashPassword("password123"); err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if err := db.Create(&testUser).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewBufferString(`{"username":"testuser","password":"password123"}`))
+	w := httptest.NewRecorder()
+
+	LoginHandler(repo)(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response handlers.FailureEnvelope
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.OK {
+		t.Fatalf("expected ok=false")
+	}
+	if response.Reason != string(handlers.ReasonInternalError) {
+		t.Fatalf("expected reason %q, got %q", handlers.ReasonInternalError, response.Reason)
 	}
 }
 

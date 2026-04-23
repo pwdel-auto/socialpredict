@@ -13,8 +13,8 @@ import (
 	"github.com/gorilla/mux"
 
 	"socialpredict/handlers"
+	positionshandlers "socialpredict/handlers/positions"
 	"socialpredict/internal/app"
-	positionsmath "socialpredict/internal/domain/math/positions"
 	authsvc "socialpredict/internal/service/auth"
 	configsvc "socialpredict/internal/service/config"
 	"socialpredict/models/modelstesting"
@@ -93,12 +93,18 @@ func TestUserMarketPositionHandlerReturnsUserPosition(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
-	var response handlers.SuccessEnvelope[positionsmath.UserMarketPosition]
+	var response handlers.SuccessEnvelope[positionshandlers.UserPositionResponse]
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 
 	position := response.Result
+	if position.Username != user.Username {
+		t.Fatalf("expected username %q, got %q", user.Username, position.Username)
+	}
+	if position.MarketID != market.ID {
+		t.Fatalf("expected market id %d, got %d", market.ID, position.MarketID)
+	}
 	if position.YesSharesOwned == 0 && position.NoSharesOwned == 0 {
 		t.Fatalf("expected non-zero shares for bettor, got %+v", position)
 	}
@@ -125,7 +131,7 @@ func TestUserMarketPositionHandlerUnauthorizedWithoutToken(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode failure envelope: %v", err)
 	}
-	if resp.Reason != string(handlers.ReasonInvalidToken) {
-		t.Fatalf("expected reason %q, got %q", handlers.ReasonInvalidToken, resp.Reason)
+	if resp.Reason != string(handlers.ReasonAuthenticationRequired) {
+		t.Fatalf("expected reason %q, got %q", handlers.ReasonAuthenticationRequired, resp.Reason)
 	}
 }
