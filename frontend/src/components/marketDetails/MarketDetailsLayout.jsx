@@ -45,6 +45,13 @@ function MarketDetailsTable({
     setRefreshTrigger(prev => prev + 1); // Trigger positions refresh
   };
 
+  const handleResolutionSuccess = () => {
+    if (refetchData) {
+      refetchData();
+    }
+    setRefreshTrigger(prev => prev + 1);
+  };
+
   const shouldShowTradeButtons =
     !safeMarket.isResolved &&
     isLoggedIn &&
@@ -173,6 +180,7 @@ function MarketDetailsTable({
             marketId={resolvedMarketId}
             token={token}
             market={market}
+            onResolved={handleResolutionSuccess}
             disabled={!token}
             className='text-xs px-4 py-2'
           />

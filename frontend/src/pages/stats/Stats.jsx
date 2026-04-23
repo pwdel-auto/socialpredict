@@ -129,7 +129,7 @@ const Stats = () => {
       }
 
       const data = await response.json();
-      setSystemMetrics(data);
+      setSystemMetrics(unwrapApiResponse(data));
     } catch (err) {
       setMetricsError(err.message);
     } finally {
@@ -153,7 +153,7 @@ const Stats = () => {
       }
 
       const data = await response.json();
-      setGlobalLeaderboard(data);
+      setGlobalLeaderboard(unwrapApiResponse(data));
     } catch (err) {
       setLeaderboardError(err.message);
     } finally {

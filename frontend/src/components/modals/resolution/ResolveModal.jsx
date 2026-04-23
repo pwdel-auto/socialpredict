@@ -3,7 +3,7 @@ import { ResolveButton, SelectNoButton, SelectYesButton, ConfirmResolveButton } 
 import { resolveMarket } from './ResolveUtils';
 import { useMarketLabels } from '../../../hooks/useMarketLabels';
 
-const ResolveModalButton = ({ marketId, token, market }) => {
+const ResolveModalButton = ({ marketId, token, market, onResolved }) => {
     const [showResolveModal, setShowResolveModal] = useState(false);
     const [selectedResolution, setSelectedResolution] = useState(null);
     
@@ -24,12 +24,14 @@ const ResolveModalButton = ({ marketId, token, market }) => {
 
         resolveMarket(marketId, token, selectedResolution)
             .then(() => {
+                onResolved?.();
                 alert('Market resolved successfully.');
             })
             .catch(error => {
                 alert(`Failed to resolve market: ${error.message}`);
             })
             .finally(() => {
+                setSelectedResolution(null);
                 setShowResolveModal(false);
             });
     };
