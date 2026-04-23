@@ -1,9 +1,20 @@
 package adminhandlers
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"socialpredict/handlers"
+	"socialpredict/internal/app"
+	configsvc "socialpredict/internal/service/config"
+	"socialpredict/models"
+	"socialpredict/models/modelstesting"
 	"socialpredict/security"
 	"strings"
 	"testing"
+
+	"gorm.io/gorm"
 )
 
 func TestUsernameValidation(t *testing.T) {
@@ -344,5 +355,173 @@ func TestUsernameReservedWords(t *testing.T) {
 				t.Logf("Reserved word '%s' was rejected: %v", word, err)
 			}
 		})
+	}
+}
+
+func TestAddUserHandler_UnauthorizedReturnsAuthenticationRequired(t *testing.T) {
+	t.Setenv("JWT_SIGNING_KEY", "test-secret-key-for-testing")
+
+	db := modelstesting.NewFakeDB(t)
+	handler := newTestAddUserHandler(t, db)
+
+	req := httptest.NewRequest(http.MethodPost, "/v0/admin/createuser", bytes.NewBufferString(`{"username":"newuser"}`))
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", rec.Code)
+	}
+
+	assertAddUserFailureReason(t, rec, handlers.ReasonAuthenticationRequired)
+}
+
+func TestAddUserHandler_NonAdminReturnsAuthorizationDenied(t *testing.T) {
+	t.Setenv("JWT_SIGNING_KEY", "test-secret-key-for-testing")
+
+	db := modelstesting.NewFakeDB(t)
+	token := seedAddUserRequester(t, db, "alice", "REGULAR", false)
+	handler := newTestAddUserHandler(t, db)
+
+	req := httptest.NewRequest(http.MethodPost, "/v0/admin/createuser", bytes.NewBufferString(`{"username":"newuser"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", rec.Code)
+	}
+
+	assertAddUserFailureReason(t, rec, handlers.ReasonAuthorizationDenied)
+}
+
+func TestAddUserHandler_PasswordChangeRequired(t *testing.T) {
+	t.Setenv("JWT_SIGNING_KEY", "test-secret-key-for-testing")
+
+	db := modelstesting.NewFakeDB(t)
+	token := seedAddUserRequester(t, db, "adminreset", "ADMIN", true)
+	handler := newTestAddUserHandler(t, db)
+
+	req := httptest.NewRequest(http.MethodPost, "/v0/admin/createuser", bytes.NewBufferString(`{"username":"newuser"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", rec.Code)
+	}
+
+	assertAddUserFailureReason(t, rec, handlers.ReasonPasswordChangeRequired)
+}
+
+func TestAddUserHandler_InvalidUsernameReturnsValidationFailed(t *testing.T) {
+	t.Setenv("JWT_SIGNING_KEY", "test-secret-key-for-testing")
+
+	db := modelstesting.NewFakeDB(t)
+	token := seedAddUserRequester(t, db, "adminuser", "ADMIN", false)
+	handler := newTestAddUserHandler(t, db)
+
+	req := httptest.NewRequest(http.MethodPost, "/v0/admin/createuser", bytes.NewBufferString(`{"username":"Invalid-Name"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", rec.Code)
+	}
+
+	assertAddUserFailureReason(t, rec, handlers.ReasonValidationFailed)
+}
+
+func TestAddUserHandler_SuccessCreatesUser(t *testing.T) {
+	t.Setenv("JWT_SIGNING_KEY", "test-secret-key-for-testing")
+
+	db := modelstesting.NewFakeDB(t)
+	token := seedAddUserRequester(t, db, "adminuser", "ADMIN", false)
+	handler := newTestAddUserHandler(t, db)
+
+	req := httptest.NewRequest(http.MethodPost, "/v0/admin/createuser", bytes.NewBufferString(`{"username":"newuser"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var response struct {
+		Message  string `json:"message"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+		UserType string `json:"usertype"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Message != "User created successfully" {
+		t.Fatalf("expected success message, got %q", response.Message)
+	}
+	if response.Username != "newuser" {
+		t.Fatalf("expected username newuser, got %q", response.Username)
+	}
+	if response.Password == "" {
+		t.Fatal("expected generated password in response")
+	}
+	if response.UserType != "REGULAR" {
+		t.Fatalf("expected usertype REGULAR, got %q", response.UserType)
+	}
+
+	var created models.User
+	if err := db.Where("username = ?", "newuser").First(&created).Error; err != nil {
+		t.Fatalf("fetch created user: %v", err)
+	}
+	if !created.MustChangePassword {
+		t.Fatal("expected created user to require password change")
+	}
+}
+
+func newTestAddUserHandler(t *testing.T, db *gorm.DB) http.HandlerFunc {
+	t.Helper()
+
+	config := modelstesting.GenerateEconomicConfig()
+	container := app.BuildApplicationWithConfigService(db, configsvc.NewStaticService(config))
+	return AddUserHandler(db, container.GetConfigService(), container.GetAuthService())
+}
+
+func seedAddUserRequester(t *testing.T, db *gorm.DB, username, userType string, mustChange bool) string {
+	t.Helper()
+
+	user := modelstesting.GenerateUser(username, 0)
+	user.UserType = userType
+	user.MustChangePassword = mustChange
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user %s: %v", username, err)
+	}
+	if !mustChange {
+		if err := db.Model(&user).Update("must_change_password", false).Error; err != nil {
+			t.Fatalf("clear must_change_password for %s: %v", username, err)
+		}
+	}
+
+	return modelstesting.GenerateValidJWT(username)
+}
+
+func assertAddUserFailureReason(t *testing.T, rec *httptest.ResponseRecorder, want handlers.FailureReason) {
+	t.Helper()
+
+	var response handlers.FailureEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode failure envelope: %v", err)
+	}
+	if response.OK {
+		t.Fatal("expected ok=false")
+	}
+	if response.Reason != string(want) {
+		t.Fatalf("expected reason %q, got %q", want, response.Reason)
 	}
 }

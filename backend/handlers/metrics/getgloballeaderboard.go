@@ -1,24 +1,28 @@
 package metricshandlers
 
 import (
-	"encoding/json"
 	"net/http"
 
+	"socialpredict/handlers"
 	analytics "socialpredict/internal/domain/analytics"
 )
 
 // GetGlobalLeaderboardHandler returns an HTTP handler that responds with the global leaderboard.
 func GetGlobalLeaderboardHandler(svc *analytics.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		leaderboard, err := svc.ComputeGlobalLeaderboard(r.Context())
-		if err != nil {
-			http.Error(w, "failed to compute global leaderboard: "+err.Error(), http.StatusInternalServerError)
+		if svc == nil {
+			_ = handlers.WriteFailure(w, http.StatusInternalServerError, handlers.ReasonInternalError)
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(leaderboard); err != nil {
-			http.Error(w, "failed to encode leaderboard response: "+err.Error(), http.StatusInternalServerError)
+		leaderboard, err := svc.ComputeGlobalLeaderboard(r.Context())
+		if err != nil {
+			_ = handlers.WriteFailure(w, http.StatusInternalServerError, handlers.ReasonInternalError)
+			return
+		}
+
+		if err := handlers.WriteResult(w, http.StatusOK, leaderboard); err != nil {
+			_ = handlers.WriteFailure(w, http.StatusInternalServerError, handlers.ReasonInternalError)
 		}
 	}
 }

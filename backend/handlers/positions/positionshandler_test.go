@@ -203,7 +203,7 @@ func TestMarketPositionsHandlerWithService_IncludesZeroPositionUsers(t *testing.
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
-	var envelope handlers.SuccessEnvelope[[]userPositionResponse]
+	var envelope handlers.SuccessEnvelope[[]UserPositionResponse]
 	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestMarketPositionsHandlerWithService_IncludesZeroPositionUsers(t *testing.
 
 	positions := envelope.Result
 
-	var locked *userPositionResponse
+	var locked *UserPositionResponse
 	for i := range positions {
 		if positions[i].Username == "testuser03" {
 			locked = &positions[i]
@@ -252,8 +252,8 @@ func TestMarketPositionsHandlerWithService_FailureEnvelope(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode failure envelope: %v", err)
 	}
-	if resp.Reason != "MARKET_NOT_FOUND" {
-		t.Fatalf("expected reason MARKET_NOT_FOUND, got %q", resp.Reason)
+	if resp.Reason != string(handlers.ReasonNotFound) {
+		t.Fatalf("expected reason %q, got %q", handlers.ReasonNotFound, resp.Reason)
 	}
 }
 

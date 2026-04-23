@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"socialpredict/handlers"
 	"socialpredict/handlers/users/dto"
 	dusers "socialpredict/internal/domain/users"
 )
@@ -138,5 +139,13 @@ func TestGetPortfolioHandlerServiceError(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected status 500, got %d", rec.Code)
+	}
+
+	var response handlers.FailureEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode failure envelope: %v", err)
+	}
+	if response.OK || response.Reason != string(handlers.ReasonInternalError) {
+		t.Fatalf("expected internal-error failure, got %+v", response)
 	}
 }

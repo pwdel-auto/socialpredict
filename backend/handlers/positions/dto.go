@@ -2,8 +2,8 @@ package positions
 
 import dmarkets "socialpredict/internal/domain/markets"
 
-// userPositionResponse defines the JSON shape returned to clients.
-type userPositionResponse struct {
+// UserPositionResponse defines the JSON shape returned to clients.
+type UserPositionResponse struct {
 	Username         string `json:"username"`
 	MarketID         int64  `json:"marketId"`
 	YesSharesOwned   int64  `json:"yesSharesOwned"`
@@ -15,12 +15,15 @@ type userPositionResponse struct {
 	ResolutionResult string `json:"resolutionResult"`
 }
 
-func newUserPositionResponse(pos *dmarkets.UserPosition) userPositionResponse {
+// NewUserPositionResponse converts the markets-domain position into the shared
+// user-position transport shape used by both public market-position and
+// authenticated user-position routes.
+func NewUserPositionResponse(pos *dmarkets.UserPosition) UserPositionResponse {
 	if pos == nil {
-		return userPositionResponse{}
+		return UserPositionResponse{}
 	}
 
-	return userPositionResponse{
+	return UserPositionResponse{
 		Username:         pos.Username,
 		MarketID:         pos.MarketID,
 		YesSharesOwned:   pos.YesSharesOwned,

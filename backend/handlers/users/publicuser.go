@@ -6,6 +6,8 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"socialpredict/handlers"
+	"socialpredict/handlers/failurereason"
 	"socialpredict/handlers/users/dto"
 	dusers "socialpredict/internal/domain/users"
 )
@@ -15,18 +17,14 @@ func GetPublicUserHandler(svc dusers.ServiceInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		username := mux.Vars(r)["username"]
 		if username == "" {
-			http.Error(w, "username is required", http.StatusBadRequest)
+			_ = handlers.WriteFailure(w, http.StatusBadRequest, handlers.ReasonInvalidRequest)
 			return
 		}
 
 		user, err := svc.GetPublicUser(r.Context(), username)
 		if err != nil {
-			switch err {
-			case dusers.ErrUserNotFound:
-				http.Error(w, "user not found", http.StatusNotFound)
-			default:
-				http.Error(w, "failed to fetch user", http.StatusInternalServerError)
-			}
+			statusCode, reason := failurereason.FromUserError(err)
+			_ = handlers.WriteFailure(w, statusCode, reason)
 			return
 		}
 
@@ -46,7 +44,7 @@ func GetPublicUserHandler(svc dusers.ServiceInterface) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			_ = handlers.WriteFailure(w, http.StatusInternalServerError, handlers.ReasonInternalError)
 		}
 	}
 }

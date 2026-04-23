@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"socialpredict/handlers"
@@ -82,8 +83,8 @@ func TestStatsHandlerRequiresConfigService(t *testing.T) {
 		t.Fatalf("expected ok=false, got true")
 	}
 
-	if response.Reason != string(reasonStatsUnavailable) {
-		t.Fatalf("expected reason %q, got %q", reasonStatsUnavailable, response.Reason)
+	if response.Reason != string(handlers.ReasonInternalError) {
+		t.Fatalf("expected reason %q, got %q", handlers.ReasonInternalError, response.Reason)
 	}
 }
 
@@ -101,12 +102,21 @@ func TestStatsHandlerSanitizesDatabaseErrors(t *testing.T) {
 		t.Fatalf("expected non-empty response body")
 	}
 
+	var response handlers.FailureEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Reason != string(handlers.ReasonInternalError) {
+		t.Fatalf("expected reason %q, got %q", handlers.ReasonInternalError, response.Reason)
+	}
+
 	if containsRawErrorDetails(rr.Body.String()) {
 		t.Fatalf("expected sanitized response, got %s", rr.Body.String())
 	}
 }
 
 func containsRawErrorDetails(body string) bool {
-	return body == "Failed to calculate financial stats: database connection is not initialized\n" ||
-		body == "Failed to load setup configuration: configuration service unavailable\n"
+	return strings.Contains(body, "database connection is not initialized") ||
+		strings.Contains(body, "configuration service unavailable")
 }

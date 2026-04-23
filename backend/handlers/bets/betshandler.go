@@ -53,7 +53,7 @@ func parseMarketID(marketIDStr string) (int64, error) {
 func writeMarketBetsError(w http.ResponseWriter, marketID int64, err error) {
 	switch err {
 	case dmarkets.ErrMarketNotFound:
-		_ = handlers.WriteFailure(w, http.StatusNotFound, handlers.ReasonMarketNotFound)
+		_ = handlers.WriteFailure(w, http.StatusNotFound, handlers.ReasonNotFound)
 	case dmarkets.ErrInvalidInput:
 		_ = handlers.WriteFailure(w, http.StatusBadRequest, handlers.ReasonInvalidRequest)
 	default:

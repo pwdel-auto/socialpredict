@@ -6,6 +6,8 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"socialpredict/handlers"
+	"socialpredict/handlers/failurereason"
 	dusers "socialpredict/internal/domain/users"
 	authsvc "socialpredict/internal/service/auth"
 	configsvc "socialpredict/internal/service/config"
@@ -19,25 +21,26 @@ import (
 func AddUserHandler(db *gorm.DB, configService configsvc.Service, auth authsvc.Authenticator) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "Method not supported", http.StatusMethodNotAllowed)
+			_ = handlers.WriteFailure(w, http.StatusMethodNotAllowed, handlers.ReasonMethodNotAllowed)
 			return
 		}
 
 		responseData, handlerErr := processAddUser(r, db, configService, auth)
 		if handlerErr != nil {
-			http.Error(w, handlerErr.message, handlerErr.statusCode)
+			_ = handlers.WriteFailure(w, handlerErr.statusCode, handlerErr.reason)
 			if handlerErr.logErr != nil {
 				log.Printf("AddUserHandler: %v", handlerErr.logErr)
 			}
 			return
 		}
 
+		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(responseData)
 	}
 }
 
 type handlerError struct {
-	message    string
+	reason     handlers.FailureReason
 	statusCode int
 	logErr     error
 }
@@ -46,43 +49,43 @@ func processAddUser(r *http.Request, db *gorm.DB, configService configsvc.Servic
 	securityService := security.NewSecurityService()
 	req, decodeErr := decodeAddUserRequest(r)
 	if decodeErr != nil {
-		return nil, &handlerError{message: decodeErr.Error(), statusCode: http.StatusBadRequest, logErr: decodeErr}
+		return nil, &handlerError{reason: handlers.ReasonInvalidRequest, statusCode: http.StatusBadRequest, logErr: decodeErr}
 	}
 
 	if err := validateAddUserUsername(securityService, req.Username); err != nil {
-		return nil, &handlerError{message: "Invalid username: " + err.Error(), statusCode: http.StatusBadRequest, logErr: err}
+		return nil, &handlerError{reason: handlers.ReasonValidationFailed, statusCode: http.StatusBadRequest, logErr: err}
 	}
 	req.Username, _ = securityService.Sanitizer.SanitizeUsername(req.Username)
 
 	if db == nil {
-		return nil, &handlerError{message: "database unavailable", statusCode: http.StatusInternalServerError}
+		return nil, &handlerError{reason: handlers.ReasonInternalError, statusCode: http.StatusInternalServerError}
 	}
 
 	if auth == nil {
-		return nil, &handlerError{message: "authentication service unavailable", statusCode: http.StatusInternalServerError}
+		return nil, &handlerError{reason: handlers.ReasonInternalError, statusCode: http.StatusInternalServerError}
 	}
 	if _, httpErr := auth.RequireAdmin(r); httpErr != nil {
-		return nil, &handlerError{message: httpErr.Message, statusCode: httpErr.StatusCode}
+		return nil, &handlerError{reason: failurereason.FromAuthHTTPError(httpErr), statusCode: httpErr.StatusCode, logErr: httpErr}
 	}
 
 	if configService == nil {
-		return nil, &handlerError{message: "configuration service unavailable", statusCode: http.StatusInternalServerError}
+		return nil, &handlerError{reason: handlers.ReasonInternalError, statusCode: http.StatusInternalServerError}
 	}
 
 	appConfig := configService.Current()
 	user := buildNewUser(db, req.Username, appConfig)
 
 	if err := checkUniqueFields(db, &user); err != nil {
-		return nil, &handlerError{message: err.Error(), statusCode: http.StatusBadRequest, logErr: err}
+		return nil, &handlerError{reason: handlers.ReasonValidationFailed, statusCode: http.StatusBadRequest, logErr: err}
 	}
 
 	password, err := generateAndHashPassword(&user)
 	if err != nil {
-		return nil, &handlerError{message: err.Error(), statusCode: http.StatusInternalServerError, logErr: err}
+		return nil, &handlerError{reason: handlers.ReasonInternalError, statusCode: http.StatusInternalServerError, logErr: err}
 	}
 
 	if result := db.Create(&user); result.Error != nil {
-		return nil, &handlerError{message: "Failed to create user", statusCode: http.StatusInternalServerError, logErr: result.Error}
+		return nil, &handlerError{reason: handlers.ReasonInternalError, statusCode: http.StatusInternalServerError, logErr: result.Error}
 	}
 
 	responseData := map[string]interface{}{

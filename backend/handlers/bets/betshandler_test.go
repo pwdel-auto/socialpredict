@@ -114,7 +114,7 @@ func TestMarketBetsHandlerWithService(t *testing.T) {
 				},
 			},
 			wantStatusCode: http.StatusNotFound,
-			wantReason:     string(handlers.ReasonMarketNotFound),
+			wantReason:     string(handlers.ReasonNotFound),
 		},
 		{
 			name:   "invalid input from service",

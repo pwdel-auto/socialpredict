@@ -36,9 +36,10 @@ func parseListMarketsParams(r *http.Request) (listMarketsParams, error) {
 		limit:  page.Limit,
 		offset: page.Offset,
 		filters: dmarkets.ListFilters{
-			Status: status,
-			Limit:  page.Limit,
-			Offset: page.Offset,
+			Status:    status,
+			CreatedBy: r.URL.Query().Get("created_by"),
+			Limit:     page.Limit,
+			Offset:    page.Offset,
 		},
 		page: page,
 	}, nil

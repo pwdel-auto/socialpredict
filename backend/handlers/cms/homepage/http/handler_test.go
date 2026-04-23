@@ -62,6 +62,34 @@ func TestPublicGet_ReturnsHomepageContent(t *testing.T) {
 	}
 }
 
+func TestPublicGet_ReturnsNotFoundReason(t *testing.T) {
+	db := modelstesting.NewFakeDB(t)
+
+	repo := homepage.NewGormRepository(db)
+	renderer := homepage.NewDefaultRenderer()
+	svc := homepage.NewService(repo, renderer)
+	usersSvc := dusers.NewService(rusers.NewGormRepository(db), nil, security.NewSecurityService().Sanitizer)
+	auth := authsvc.NewAuthService(usersSvc)
+	handler := NewHandler(svc, auth)
+
+	req := httptest.NewRequest("GET", "/v0/content/home", nil)
+	rec := httptest.NewRecorder()
+
+	handler.PublicGet(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", rec.Code)
+	}
+
+	var resp handlers.FailureEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode failure response: %v", err)
+	}
+	if resp.Reason != string(handlers.ReasonNotFound) {
+		t.Fatalf("expected reason %q, got %q", handlers.ReasonNotFound, resp.Reason)
+	}
+}
+
 func TestAdminUpdate_Success(t *testing.T) {
 	db := modelstesting.NewFakeDB(t)
 	t.Setenv("JWT_SIGNING_KEY", "test-secret-key-for-testing")
@@ -71,6 +99,9 @@ func TestAdminUpdate_Success(t *testing.T) {
 	admin.MustChangePassword = false
 	if err := db.Create(&admin).Error; err != nil {
 		t.Fatalf("create admin user: %v", err)
+	}
+	if err := db.Model(&admin).Update("must_change_password", false).Error; err != nil {
+		t.Fatalf("update must_change_password: %v", err)
 	}
 
 	item := models.HomepageContent{
@@ -158,7 +189,84 @@ func TestAdminUpdate_Unauthorized(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode failure envelope: %v", err)
 	}
-	if resp.Reason != string(handlers.ReasonInvalidToken) {
-		t.Fatalf("expected reason %q, got %q", handlers.ReasonInvalidToken, resp.Reason)
+	if resp.Reason != string(handlers.ReasonAuthenticationRequired) {
+		t.Fatalf("expected reason %q, got %q", handlers.ReasonAuthenticationRequired, resp.Reason)
+	}
+}
+
+func TestAdminUpdate_NonAdminReturnsAuthorizationDenied(t *testing.T) {
+	db := modelstesting.NewFakeDB(t)
+	t.Setenv("JWT_SIGNING_KEY", "test-secret-key-for-testing")
+
+	user := modelstesting.GenerateUser("alice", 0)
+	user.UserType = "REGULAR"
+	user.MustChangePassword = false
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Model(&user).Update("must_change_password", false).Error; err != nil {
+		t.Fatalf("update must_change_password: %v", err)
+	}
+
+	repo := homepage.NewGormRepository(db)
+	renderer := homepage.NewDefaultRenderer()
+	svc := homepage.NewService(repo, renderer)
+	usersSvc := dusers.NewService(rusers.NewGormRepository(db), nil, security.NewSecurityService().Sanitizer)
+	auth := authsvc.NewAuthService(usersSvc)
+	handler := NewHandler(svc, auth)
+
+	req := httptest.NewRequest("PUT", "/v0/admin/content/home", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Authorization", "Bearer "+modelstesting.GenerateValidJWT(user.Username))
+	rec := httptest.NewRecorder()
+
+	handler.AdminUpdate(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", rec.Code)
+	}
+
+	var resp handlers.FailureEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode failure envelope: %v", err)
+	}
+	if resp.Reason != string(handlers.ReasonAuthorizationDenied) {
+		t.Fatalf("expected reason %q, got %q", handlers.ReasonAuthorizationDenied, resp.Reason)
+	}
+}
+
+func TestAdminUpdate_PasswordChangeRequired(t *testing.T) {
+	db := modelstesting.NewFakeDB(t)
+	t.Setenv("JWT_SIGNING_KEY", "test-secret-key-for-testing")
+
+	admin := modelstesting.GenerateUser("admin_user", 0)
+	admin.UserType = "ADMIN"
+	admin.MustChangePassword = true
+	if err := db.Create(&admin).Error; err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+
+	repo := homepage.NewGormRepository(db)
+	renderer := homepage.NewDefaultRenderer()
+	svc := homepage.NewService(repo, renderer)
+	usersSvc := dusers.NewService(rusers.NewGormRepository(db), nil, security.NewSecurityService().Sanitizer)
+	auth := authsvc.NewAuthService(usersSvc)
+	handler := NewHandler(svc, auth)
+
+	req := httptest.NewRequest("PUT", "/v0/admin/content/home", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Authorization", "Bearer "+modelstesting.GenerateValidJWT(admin.Username))
+	rec := httptest.NewRecorder()
+
+	handler.AdminUpdate(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", rec.Code)
+	}
+
+	var resp handlers.FailureEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode failure envelope: %v", err)
+	}
+	if resp.Reason != string(handlers.ReasonPasswordChangeRequired) {
+		t.Fatalf("expected reason %q, got %q", handlers.ReasonPasswordChangeRequired, resp.Reason)
 	}
 }

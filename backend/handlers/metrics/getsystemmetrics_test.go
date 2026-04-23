@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"socialpredict/handlers"
 	analytics "socialpredict/internal/domain/analytics"
 	"socialpredict/internal/domain/boundary"
 	positionsmath "socialpredict/internal/domain/math/positions"
@@ -38,17 +41,21 @@ func TestGetSystemMetricsHandler_Success(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != 200 {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var payload map[string]interface{}
+	var payload handlers.SuccessEnvelope[analytics.SystemMetrics]
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 
-	if payload["moneyCreated"] == nil {
-		t.Fatalf("expected moneyCreated section in response: %+v", payload)
+	if !payload.OK {
+		t.Fatalf("expected ok=true, got false")
+	}
+
+	if payload.Result.MoneyCreated.UserDebtCapacity.Value == 0 {
+		t.Fatalf("expected userDebtCapacity metric in response: %+v", payload.Result)
 	}
 }
 
@@ -85,7 +92,18 @@ func TestGetSystemMetricsHandler_Error(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != 500 {
+	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected status 500, got %d", rec.Code)
+	}
+
+	var payload handlers.FailureEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode failure envelope: %v", err)
+	}
+	if payload.Reason != string(handlers.ReasonInternalError) {
+		t.Fatalf("expected reason %q, got %q", handlers.ReasonInternalError, payload.Reason)
+	}
+	if strings.Contains(rec.Body.String(), "boom") {
+		t.Fatalf("expected sanitized failure body, got %s", rec.Body.String())
 	}
 }
